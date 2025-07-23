@@ -1,5 +1,4 @@
-```lua
--- Подключаем сервисы Roblox
+-- Подключение сервисов Roblox для работы с игрой
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local RunService = game:GetService("RunService")
@@ -9,81 +8,135 @@ local CoreGui = game:GetService("CoreGui")
 local HttpService = game:GetService("HttpService")
 local Workspace = game:GetService("Workspace")
 local Lighting = game:GetService("Lighting")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
--- Состояние меню
-local guiOpen = false
-local currentTab = "Главная"
-local settingsOpen = false
-local isDragging = false
-local dragStart, startPos
+-- Состояние интерфейса
+local guiOpen = false -- Флаг, показывающий, открыто ли меню
+local currentTab = "Главная" -- Текущая активная вкладка
+local settingsOpen = false -- Флаг окна настроек
+local isDragging = false -- Флаг перетаскивания меню
+local dragStart, startPos -- Переменные для перетаскивания
+local notificationQueue = {} -- Очередь уведомлений
 
--- Конфигурация
+-- Конфигурация чита
 local config = {
-    menuColor = Color3.fromRGB(30, 30, 30), -- Цвет фона меню
+    menuColor = Color3.fromRGB(30, 30, 30), -- Основной цвет меню
     accentColor = Color3.fromRGB(0, 170, 255), -- Акцентный цвет
-    animationType = "SlideFade", -- Тип анимации
-    animationSpeed = 0.3, -- Скорость анимации
+    useGradient = true, -- Использовать градиент для меню
+    gradientColor1 = Color3.fromRGB(0, 120, 255), -- Начало градиента
+    gradientColor2 = Color3.fromRGB(0, 255, 200), -- Конец градиента
+    animationType = "SlideFade", -- Тип анимации меню
+    animationSpeed = 0.3, -- Скорость анимации (в секундах)
     espEnabled = false, -- Включён ли ESP
+    espMurdererColor = Color3.fromRGB(255, 0, 0), -- Цвет ESP для мардера
+    espSheriffColor = Color3.fromRGB(0, 0, 255), -- Цвет ESP для шерифа
+    espInnocentColor = Color3.fromRGB(0, 255, 0), -- Цвет ESP для мирных
+    espTransparency = 0.5, -- Прозрачность ESP
+    espShowNames = true, -- Показывать имена игроков
+    espShowRoles = true, -- Показывать роли игроков
     aimbotEnabled = false, -- Включён ли аимбот
+    aimbotFOV = 100, -- Поле зрения аимбота
     killAuraEnabled = false, -- Включена ли килл-аура
     autoFarm = false, -- Включён ли автофарм монет
     speedHack = 16, -- Скорость персонажа
-    espColor = Color3.fromRGB(255, 0, 0), -- Цвет ESP
-    espTransparency = 0.5, -- Прозрачность ESP
     noclip = false, -- Включён ли ноклип
     godMode = false, -- Включён ли режим бога
     murdererFeatures = false, -- Функции для мардера
     sheriffFeatures = false, -- Функции для шерифа
+    knifeAuraRange = 15, -- Радиус ауры ножа
+    gunAuraRange = 20, -- Радиус ауры пистолета
     teleportEnabled = false, -- Включён ли телепорт
     teleportSpeed = 200, -- Скорость телепорта
-    knifeAuraRange = 15, -- Радиус ауры ножа
-    gunAuraRange = 20 -- Радиус ауры пистолета
+    autoKnifeThrow = false, -- Автоматический бросок ножа (мардер)
+    autoShoot = false, -- Автоматическая стрельба (шериф)
+    visualEffects = true, -- Включены ли визуальные эффекты (например, частицы)
+    notificationDuration = 3 -- Длительность уведомлений (в секундах)
 }
 
--- Сохранение/загрузка конфигурации
+-- Сохранение конфигурации
 local function saveConfig()
-    if writefile then
-        local success, err = pcall(function()
+    local success, err = pcall(function()
+        if writefile then
             local json = HttpService:JSONEncode(config)
-            writefile("XovalMM2ProConfig.json", json)
-        end)
-        if not success then
-            warn("[XOVAL] Ошибка сохранения конфигурации: " .. err)
+            writefile("XovalConfig.json", json)
+            print("[XOVAL] Конфигурация сохранена")
+        else
+            warn("[XOVAL] Функция writefile не поддерживается")
         end
-    else
-        warn("[XOVAL] Функция writefile не поддерживается")
+    end)
+    if not success then
+        warn("[XOVAL] Ошибка сохранения конфигурации: " .. err)
     end
 end
 
+-- Загрузка конфигурации
 local function loadConfig()
-    if readfile and isfile and isfile("XovalMM2ProConfig.json") then
-        local success, result = pcall(function()
-            local json = readfile("XovalMM2ProConfig.json")
+    local success, result = pcall(function()
+        if readfile and isfile and isfile("XovalConfig.json") then
+            local json = readfile("XovalConfig.json")
             return HttpService:JSONDecode(json)
-        end)
-        if success then
-            for k, v in pairs(result) do
-                config[k] = v
-            end
-        else
-            warn("[XOVAL] Ошибка загрузки конфигурации: " .. result)
         end
+    end)
+    if success and result then
+        for k, v in pairs(result) do
+            config[k] = v
+        end
+        print("[XOVAL] Конфигурация загружена")
+    else
+        warn("[XOVAL] Не удалось загрузить конфигурацию")
     end
 end
 
 loadConfig()
 
+-- Создание уведомлений
+local function createNotification(message, color)
+    table.insert(notificationQueue, {text = message, color = color or Color3.fromRGB(255, 255, 255)})
+    if #notificationQueue > 5 then
+        table.remove(notificationQueue, 1)
+    end
+
+    local notificationFrame = Instance.new("Frame")
+    notificationFrame.Size = UDim2.new(0, 300, 0, 50)
+    notificationFrame.Position = UDim2.new(1, -310, 1, -60 - (#notificationQueue - 1) * 60)
+    notificationFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+    notificationFrame.BorderSizePixel = 0
+    notificationFrame.Parent = screenGui
+    local corner = Instance.new("UICorner", notificationFrame)
+    corner.CornerRadius = UDim.new(0, 8)
+    local stroke = Instance.new("UIStroke", notificationFrame)
+    stroke.Color = config.accentColor
+    stroke.Thickness = 1
+
+    local label = Instance.new("TextLabel", notificationFrame)
+    label.Size = UDim2.new(1, -20, 1, -10)
+    label.Position = UDim2.new(0, 10, 0, 5)
+    label.BackgroundTransparency = 1
+    label.Text = message
+    label.TextColor3 = color or Color3.fromRGB(255, 255, 255)
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 14
+    label.TextWrapped = true
+    label.TextXAlignment = Enum.TextXAlignment.Left
+
+    local tweenInfo = TweenInfo.new(config.notificationDuration, Enum.EasingStyle.Linear)
+    TweenService:Create(notificationFrame, tweenInfo, {BackgroundTransparency = 1, Position = UDim2.new(1, -310, 1, -60 - (#notificationQueue - 1) * 60)}):Play()
+    TweenService:Create(label, tweenInfo, {TextTransparency = 1}):Play()
+    wait(config.notificationDuration)
+    notificationFrame:Destroy()
+end
+
 -- Создание интерфейса
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "XovalMM2Pro"
+screenGui.Name = "Xoval"
 screenGui.Parent = CoreGui
 screenGui.ResetOnSpawn = false
 screenGui.Enabled = true
 
 -- Главный фрейм (перетаскиваемый)
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 500, 0, 550)
-mainFrame.Position = UDim2.new(0.5, -250, 0.5, -275)
+mainFrame.Size = UDim2.new(0, 550, 0, 600)
+mainFrame.Position = UDim2.new(0.5, -275, 0.5, -300)
 mainFrame.BackgroundColor3 = config.menuColor
 mainFrame.BorderSizePixel = 0
 mainFrame.Visible = false
@@ -93,6 +146,9 @@ uICorner.CornerRadius = UDim.new(0, 12)
 local uiStroke = Instance.new("UIStroke", mainFrame)
 uiStroke.Color = config.accentColor
 uiStroke.Thickness = 2
+local gradient = Instance.new("UIGradient", mainFrame)
+gradient.Enabled = config.useGradient
+gradient.Color = ColorSequence.new(config.gradientColor1, config.gradientColor2)
 
 -- Перетаскивание
 mainFrame.InputBegan:Connect(function(input)
@@ -123,16 +179,19 @@ topBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 topBar.BorderSizePixel = 0
 local topCorner = Instance.new("UICorner", topBar)
 topCorner.CornerRadius = UDim.new(0, 12)
+local topGradient = Instance.new("UIGradient", topBar)
+topGradient.Enabled = config.useGradient
+topGradient.Color = ColorSequence.new(config.gradientColor1, config.gradientColor2)
 
 -- Заголовок
 local title = Instance.new("TextLabel", topBar)
 title.Size = UDim2.new(0.5, 0, 1, 0)
 title.Position = UDim2.new(0, 15, 0, 0)
 title.BackgroundTransparency = 1
-title.Text = "XOVAL MM2 PRO"
+title.Text = "XOVAL"
 title.TextColor3 = config.accentColor
 title.Font = Enum.Font.GothamBold
-title.TextSize = 20
+title.TextSize = 24
 title.TextXAlignment = Enum.TextXAlignment.Left
 
 -- Кнопка закрытия
@@ -147,14 +206,17 @@ closeBtn.TextSize = 18
 local closeCorner = Instance.new("UICorner", closeBtn)
 closeCorner.CornerRadius = UDim.new(0, 10)
 
--- Система вкладок
+-- Вкладки
 local tabHolder = Instance.new("Frame", mainFrame)
-tabHolder.Size = UDim2.new(0, 120, 1, -60)
+tabHolder.Size = UDim2.new(0, 130, 1, -70)
 tabHolder.Position = UDim2.new(0, 10, 0, 60)
 tabHolder.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 tabHolder.BorderSizePixel = 0
 local tabHolderCorner = Instance.new("UICorner", tabHolder)
 tabHolderCorner.CornerRadius = UDim.new(0, 10)
+local tabHolderStroke = Instance.new("UIStroke", tabHolder)
+tabHolderStroke.Color = config.accentColor
+tabHolderStroke.Thickness = 1
 
 local tabLayout = Instance.new("UIListLayout", tabHolder)
 tabLayout.Padding = UDim.new(0, 5)
@@ -174,11 +236,14 @@ for i, tabName in ipairs(tabs) do
     tabBtn.TextSize = 16
     local tabCorner = Instance.new("UICorner", tabBtn)
     tabCorner.CornerRadius = UDim.new(0, 8)
+    local tabStroke = Instance.new("UIStroke", tabBtn)
+    tabStroke.Color = config.accentColor
+    tabStroke.Thickness = 1
     tabButtons[tabName] = tabBtn
 
     local tabFrame = Instance.new("ScrollingFrame", mainFrame)
-    tabFrame.Size = UDim2.new(1, -150, 1, -80)
-    tabFrame.Position = UDim2.new(0, 140, 0, 60)
+    tabFrame.Size = UDim2.new(1, -150, 1, -90)
+    tabFrame.Position = UDim2.new(0, 150, 0, 70)
     tabFrame.BackgroundTransparency = 1
     tabFrame.ScrollBarThickness = 4
     tabFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
@@ -196,15 +261,15 @@ local footer = Instance.new("TextLabel", mainFrame)
 footer.Size = UDim2.new(1, 0, 0, 20)
 footer.Position = UDim2.new(0, 0, 1, -20)
 footer.BackgroundTransparency = 1
-footer.Text = "Переключение: Insert | Создано XOVAL Team"
+footer.Text = "Переключение: Insert | XOVAL Team 2025"
 footer.TextColor3 = Color3.fromRGB(100, 100, 100)
 footer.Font = Enum.Font.Gotham
 footer.TextSize = 12
 
 -- Фрейм настроек
 local settingsFrame = Instance.new("Frame", screenGui)
-settingsFrame.Size = UDim2.new(0, 400, 0, 500)
-settingsFrame.Position = UDim2.new(0.5, -200, 0.5, -250)
+settingsFrame.Size = UDim2.new(0, 450, 0, 550)
+settingsFrame.Position = UDim2.new(0.5, -225, 0.5, -275)
 settingsFrame.BackgroundColor3 = config.menuColor
 settingsFrame.BorderSizePixel = 0
 settingsFrame.Visible = false
@@ -213,6 +278,9 @@ settingsCorner.CornerRadius = UDim.new(0, 12)
 local settingsStroke = Instance.new("UIStroke", settingsFrame)
 settingsStroke.Color = config.accentColor
 settingsStroke.Thickness = 2
+local settingsGradient = Instance.new("UIGradient", settingsFrame)
+settingsGradient.Enabled = config.useGradient
+settingsGradient.Color = ColorSequence.new(config.gradientColor1, config.gradientColor2)
 
 -- Верхняя панель настроек
 local settingsTopBar = Instance.new("Frame", settingsFrame)
@@ -221,6 +289,9 @@ settingsTopBar.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 settingsTopBar.BorderSizePixel = 0
 local settingsTopCorner = Instance.new("UICorner", settingsTopBar)
 settingsTopCorner.CornerRadius = UDim.new(0, 12)
+local settingsTopGradient = Instance.new("UIGradient", settingsTopBar)
+settingsTopGradient.Enabled = config.useGradient
+settingsTopGradient.Color = ColorSequence.new(config.gradientColor1, config.gradientColor2)
 
 -- Заголовок настроек
 local settingsTitle = Instance.new("TextLabel", settingsTopBar)
@@ -230,7 +301,7 @@ settingsTitle.BackgroundTransparency = 1
 settingsTitle.Text = "Настройки"
 settingsTitle.TextColor3 = config.accentColor
 settingsTitle.Font = Enum.Font.GothamBold
-settingsTitle.TextSize = 20
+settingsTitle.TextSize = 24
 settingsTitle.TextXAlignment = Enum.TextXAlignment.Left
 
 -- Кнопка закрытия настроек
@@ -293,18 +364,61 @@ for _, preset in ipairs(colorPresets) do
     colorBtn.TextSize = 12
     local btnCorner = Instance.new("UICorner", colorBtn)
     btnCorner.CornerRadius = UDim.new(0, 8)
+    local btnStroke = Instance.new("UIStroke", colorBtn)
+    btnStroke.Color = Color3.fromRGB(255, 255, 255)
+    btnStroke.Thickness = 1
     colorBtn.MouseButton1Click:Connect(function()
         config.accentColor = preset.Color
         title.TextColor3 = preset.Color
         uiStroke.Color = preset.Color
         settingsStroke.Color = preset.Color
         settingsTitle.TextColor3 = preset.Color
+        tabHolderStroke.Color = preset.Color
         for _, btn in pairs(tabButtons) do
             btn.TextColor3 = currentTab == btn.Text and preset.Color or Color3.fromRGB(200, 200, 200)
+            btn:FindFirstChildOfClass("UIStroke").Color = preset.Color
         end
         saveConfig()
+        createNotification("Акцентный цвет изменён на " .. preset.Name, preset.Color)
     end)
 end
+
+-- Переключатель градиента
+local gradientToggle = Instance.new("Frame", settingsScroll)
+gradientToggle.Size = UDim2.new(1, 0, 0, 40)
+gradientToggle.BackgroundTransparency = 1
+
+local gradientToggleBtn = Instance.new("TextButton", gradientToggle)
+gradientToggleBtn.Size = UDim2.new(0, 60, 0, 30)
+gradientToggleBtn.Position = UDim2.new(1, -70, 0, 5)
+gradientToggleBtn.BackgroundColor3 = config.useGradient and Color3.fromRGB(0, 200, 0) or Color3.fromRGB(200, 0, 0)
+gradientToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+gradientToggleBtn.Text = config.useGradient and "ВКЛ" or "ВЫКЛ"
+gradientToggleBtn.Font = Enum.Font.Gotham
+gradientToggleBtn.TextSize = 14
+local gradientToggleCorner = Instance.new("UICorner", gradientToggleBtn)
+gradientToggleCorner.CornerRadius = UDim.new(0, 8)
+
+local gradientToggleLabel = Instance.new("TextLabel", gradientToggle)
+gradientToggleLabel.Size = UDim2.new(0.8, 0, 1, 0)
+gradientToggleLabel.BackgroundTransparency = 1
+gradientToggleLabel.Text = "Использовать градиент"
+gradientToggleLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+gradientToggleLabel.Font = Enum.Font.Gotham
+gradientToggleLabel.TextSize = 16
+gradientToggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+gradientToggleBtn.MouseButton1Click:Connect(function()
+    config.useGradient = not config.useGradient
+    gradientToggleBtn.BackgroundColor3 = config.useGradient and Color3.fromRGB(0, 200, 0) or Color3.fromRGB(200, 0, 0)
+    gradientToggleBtn.Text = config.useGradient and "ВКЛ" or "ВЫКЛ"
+    gradient.Enabled = config.useGradient
+    topGradient.Enabled = config.useGradient
+    settingsGradient.Enabled = config.useGradient
+    settingsTopGradient.Enabled = config.useGradient
+    saveConfig()
+    createNotification("Градиент " .. (config.useGradient and "включён" or "выключен"), config.accentColor)
+end)
 
 -- Каталог анимаций
 local animationTypes = {
@@ -334,6 +448,9 @@ animDropdown.Font = Enum.Font.Gotham
 animDropdown.TextSize = 16
 local animCorner = Instance.new("UICorner", animDropdown)
 animCorner.CornerRadius = UDim.new(0, 8)
+local animStroke = Instance.new("UIStroke", animDropdown)
+animStroke.Color = config.accentColor
+animStroke.Thickness = 1
 
 local animDropdownFrame = Instance.new("Frame", settingsScroll)
 animDropdownFrame.Size = UDim2.new(1, 0, 0, #animationTypes * 40)
@@ -354,11 +471,15 @@ for _, anim in ipairs(animationTypes) do
     animOption.TextSize = 14
     local optionCorner = Instance.new("UICorner", animOption)
     optionCorner.CornerRadius = UDim.new(0, 6)
+    local optionStroke = Instance.new("UIStroke", animOption)
+    optionStroke.Color = config.accentColor
+    optionStroke.Thickness = 1
     animOption.MouseButton1Click:Connect(function()
         config.animationType = anim
         animDropdown.Text = anim
         animDropdownFrame.Visible = false
         saveConfig()
+        createNotification("Анимация изменена на " .. anim, config.accentColor)
     end)
 end
 
@@ -381,6 +502,9 @@ speedSlider.Size = UDim2.new(1, 0, 0, 20)
 speedSlider.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 local speedCorner = Instance.new("UICorner", speedSlider)
 speedCorner.CornerRadius = UDim.new(0, 10)
+local speedStroke = Instance.new("UIStroke", speedSlider)
+speedStroke.Color = config.accentColor
+speedStroke.Thickness = 1
 
 local speedKnob = Instance.new("Frame", speedSlider)
 speedKnob.Size = UDim2.new(0, 20, 1, 0)
@@ -398,6 +522,7 @@ speedSlider.InputBegan:Connect(function(input)
             speedKnob.Position = UDim2.new(relativeX, 0, 0, 0)
             speedLabel.Text = "Скорость анимации: " .. string.format("%.2f", config.animationSpeed) .. "с"
             saveConfig()
+            createNotification("Скорость анимации: " .. string.format("%.2f", config.animationSpeed) .. "с", config.accentColor)
         end
         local conn
         conn = UserInputService.InputChanged:Connect(function(input)
@@ -423,10 +548,14 @@ unloadBtn.Font = Enum.Font.GothamBold
 unloadBtn.TextSize = 20
 local unloadUICorner = Instance.new("UICorner", unloadBtn)
 unloadUICorner.CornerRadius = UDim.new(0, 15)
+local unloadStroke = Instance.new("UIStroke", unloadBtn)
+unloadStroke.Color = Color3.fromRGB(255, 255, 255)
+unloadStroke.Thickness = 1
 
 unloadBtn.MouseButton1Click:Connect(function()
     screenGui:Destroy()
-    print("[XOVAL MM2 PRO] Чит выгружен")
+    print("[XOVAL] Чит выгружен")
+    createNotification("Чит выгружен", Color3.fromRGB(200, 40, 40))
 end)
 
 -- Анимации
@@ -434,24 +563,24 @@ local function animateOpen(frame)
     frame.Visible = true
     local tweenInfo = TweenInfo.new(config.animationSpeed, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
     if config.animationType == "SlideFade" then
-        frame.Position = UDim2.new(0.5, -250, 1.5, -275)
+        frame.Position = UDim2.new(0.5, -275, 1.5, -300)
         frame.BackgroundTransparency = 1
-        TweenService:Create(frame, tweenInfo, {Position = UDim2.new(0.5, -250, 0.5, -275), BackgroundTransparency = 0}):Play()
+        TweenService:Create(frame, tweenInfo, {Position = UDim2.new(0.5, -275, 0.5, -300), BackgroundTransparency = 0}):Play()
     elseif config.animationType == "PopIn" then
         frame.Size = UDim2.new(0, 0, 0, 0)
-        TweenService:Create(frame, tweenInfo, {Size = UDim2.new(0, 500, 0, 550)}):Play()
+        TweenService:Create(frame, tweenInfo, {Size = UDim2.new(0, 550, 0, 600)}):Play()
     elseif config.animationType == "SlideLeft" then
-        frame.Position = UDim2.new(-0.5, -250, 0.5, -275)
-        TweenService:Create(frame, tweenInfo, {Position = UDim2.new(0.5, -250, 0.5, -275)}):Play()
+        frame.Position = UDim2.new(-0.5, -275, 0.5, -300)
+        TweenService:Create(frame, tweenInfo, {Position = UDim2.new(0.5, -275, 0.5, -300)}):Play()
     elseif config.animationType == "SlideDown" then
-        frame.Position = UDim2.new(0.5, -250, -0.5, -275)
-        TweenService:Create(frame, tweenInfo, {Position = UDim2.new(0.5, -250, 0.5, -275)}):Play()
+        frame.Position = UDim2.new(0.5, -275, -0.5, -300)
+        TweenService:Create(frame, tweenInfo, {Position = UDim2.new(0.5, -275, 0.5, -300)}):Play()
     elseif config.animationType == "FadeOnly" then
         frame.BackgroundTransparency = 1
         TweenService:Create(frame, tweenInfo, {BackgroundTransparency = 0}):Play()
     elseif config.animationType == "Elastic" then
         frame.Size = UDim2.new(0, 0, 0, 0)
-        TweenService:Create(frame, TweenInfo.new(config.animationSpeed, Enum.EasingStyle.Elastic), {Size = UDim2.new(0, 500, 0, 550)}):Play()
+        TweenService:Create(frame, TweenInfo.new(config.animationSpeed, Enum.EasingStyle.Elastic), {Size = UDim2.new(0, 550, 0, 600)}):Play()
     end
 end
 
@@ -459,13 +588,13 @@ local function animateClose(frame)
     local tweenInfo = TweenInfo.new(config.animationSpeed, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
     local tween
     if config.animationType == "SlideFade" then
-        tween = TweenService:Create(frame, tweenInfo, {Position = UDim2.new(0.5, -250, 1.5, -275), BackgroundTransparency = 1})
+        tween = TweenService:Create(frame, tweenInfo, {Position = UDim2.new(0.5, -275, 1.5, -300), BackgroundTransparency = 1})
     elseif config.animationType == "PopIn" then
         tween = TweenService:Create(frame, tweenInfo, {Size = UDim2.new(0, 0, 0, 0)})
     elseif config.animationType == "SlideLeft" then
-        tween = TweenService:Create(frame, tweenInfo, {Position = UDim2.new(-0.5, -250, 0.5, -275)})
+        tween = TweenService:Create(frame, tweenInfo, {Position = UDim2.new(-0.5, -275, 0.5, -300)})
     elseif config.animationType == "SlideDown" then
-        tween = TweenService:Create(frame, tweenInfo, {Position = UDim2.new(0.5, -250, -0.5, -275)})
+        tween = TweenService:Create(frame, tweenInfo, {Position = UDim2.new(0.5, -275, -0.5, -300)})
     elseif config.animationType == "FadeOnly" then
         tween = TweenService:Create(frame, tweenInfo, {BackgroundTransparency = 1})
     elseif config.animationType == "Elastic" then
@@ -486,6 +615,7 @@ for tabName, tabBtn in pairs(tabButtons) do
         for name, btn in pairs(tabButtons) do
             btn.TextColor3 = name == tabName and config.accentColor or Color3.fromRGB(200, 200, 200)
         end
+        createNotification("Переключена вкладка: " .. tabName, config.accentColor)
     end)
 end
 
@@ -498,12 +628,14 @@ UserInputService.InputBegan:Connect(function(input, processed)
             animateOpen(mainFrame)
             settingsFrame.Visible = false
             settingsOpen = false
+            createNotification("Меню открыто", config.accentColor)
         else
             if settingsOpen then
                 animateClose(settingsFrame)
                 settingsOpen = false
             end
             animateClose(mainFrame)
+            createNotification("Меню закрыто", config.accentColor)
         end
     end
 end)
@@ -512,12 +644,14 @@ end)
 closeBtn.MouseButton1Click:Connect(function()
     guiOpen = false
     animateClose(mainFrame)
+    createNotification("Меню закрыто", config.accentColor)
 end)
 
 settingsCloseBtn.MouseButton1Click:Connect(function()
     settingsOpen = false
     animateClose(settingsFrame)
     animateOpen(mainFrame)
+    createNotification("Настройки закрыты", config.accentColor)
 end)
 
 -- Открытие настроек
@@ -525,9 +659,10 @@ tabButtons.Настройки.MouseButton1Click:Connect(function()
     settingsOpen = true
     animateOpen(settingsFrame)
     animateClose(mainFrame)
+    createNotification("Открыты настройки", config.accentColor)
 end)
 
--- Утилиты
+-- Утилиты для интерфейса
 local function createToggle(tab, name, configKey)
     local toggleFrame = Instance.new("Frame", tabFrames[tab])
     toggleFrame.Size = UDim2.new(1, 0, 0, 40)
@@ -543,6 +678,9 @@ local function createToggle(tab, name, configKey)
     toggleBtn.TextSize = 14
     local toggleCorner = Instance.new("UICorner", toggleBtn)
     toggleCorner.CornerRadius = UDim.new(0, 8)
+    local toggleStroke = Instance.new("UIStroke", toggleBtn)
+    toggleStroke.Color = config.accentColor
+    toggleStroke.Thickness = 1
 
     local toggleLabel = Instance.new("TextLabel", toggleFrame)
     toggleLabel.Size = UDim2.new(0.8, 0, 1, 0)
@@ -558,6 +696,7 @@ local function createToggle(tab, name, configKey)
         toggleBtn.BackgroundColor3 = config[configKey] and Color3.fromRGB(0, 200, 0) or Color3.fromRGB(200, 0, 0)
         toggleBtn.Text = config[configKey] and "ВКЛ" or "ВЫКЛ"
         saveConfig()
+        createNotification(name .. ": " .. (config[configKey] and "включено" or "выключено"), config.accentColor)
     end)
 end
 
@@ -581,6 +720,9 @@ local function createSlider(tab, name, configKey, min, max, default)
     slider.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
     local sliderCorner = Instance.new("UICorner", slider)
     sliderCorner.CornerRadius = UDim.new(0, 10)
+    local sliderStroke = Instance.new("UIStroke", slider)
+    sliderStroke.Color = config.accentColor
+    sliderStroke.Thickness = 1
 
     local sliderKnob = Instance.new("Frame", slider)
     sliderKnob.Size = UDim2.new(0, 20, 1, 0)
@@ -598,6 +740,7 @@ local function createSlider(tab, name, configKey, min, max, default)
                 sliderKnob.Position = UDim2.new(relativeX, 0, 0, 0)
                 sliderLabel.Text = name .. ": " .. config[configKey]
                 saveConfig()
+                createNotification(name .. ": " .. config[configKey], config.accentColor)
             end
             local conn
             conn = UserInputService.InputChanged:Connect(function(input)
@@ -616,9 +759,9 @@ end
 
 -- Вкладка "Главная"
 local welcomeLabel = Instance.new("TextLabel", tabFrames["Главная"])
-welcomeLabel.Size = UDim2.new(1, 0, 0, 100)
+welcomeLabel.Size = UDim2.new(1, 0, 0, 120)
 welcomeLabel.BackgroundTransparency = 1
-welcomeLabel.Text = "Добро пожаловать в XOVAL MM2 PRO\nПродвинутый чит для Murder Mystery 2\nПереключение меню: Insert"
+welcomeLabel.Text = "Добро пожаловать в XOVAL!\nПродвинутый чит для Murder Mystery 2\nПереключение меню: Insert\nСоздано XOVAL Team 2025"
 welcomeLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
 welcomeLabel.Font = Enum.Font.Gotham
 welcomeLabel.TextSize = 16
@@ -637,6 +780,9 @@ teleportBtn.Font = Enum.Font.GothamBold
 teleportBtn.TextSize = 18
 local teleportCorner = Instance.new("UICorner", teleportBtn)
 teleportCorner.CornerRadius = UDim.new(0, 10)
+local teleportStroke = Instance.new("UIStroke", teleportBtn)
+teleportStroke.Color = config.accentColor
+teleportStroke.Thickness = 1
 
 local teleportDropdown = Instance.new("Frame", tabFrames["Главная"])
 teleportDropdown.Size = UDim2.new(1, 0, 0, 0)
@@ -644,6 +790,9 @@ teleportDropdown.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 teleportDropdown.Visible = false
 local teleportDropdownCorner = Instance.new("UICorner", teleportDropdown)
 teleportDropdownCorner.CornerRadius = UDim.new(0, 8)
+local teleportDropdownStroke = Instance.new("UIStroke", teleportDropdown)
+teleportDropdownStroke.Color = config.accentColor
+teleportDropdownStroke.Thickness = 1
 local teleportLayout = Instance.new("UIListLayout", teleportDropdown)
 teleportLayout.Padding = UDim.new(0, 5)
 
@@ -665,11 +814,20 @@ local function updateTeleportDropdown()
             playerBtn.TextSize = 14
             local btnCorner = Instance.new("UICorner", playerBtn)
             btnCorner.CornerRadius = UDim.new(0, 6)
+            local btnStroke = Instance.new("UIStroke", playerBtn)
+            btnStroke.Color = config.accentColor
+            btnStroke.Thickness = 1
             playerBtn.MouseButton1Click:Connect(function()
-                if LocalPlayer.Character and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                    LocalPlayer.Character.HumanoidRootPart.CFrame = player.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, -2)
-                else
-                    warn("[XOVAL] Не удалось телепортироваться к " .. player.Name)
+                local success, err = pcall(function()
+                    if LocalPlayer.Character and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                        LocalPlayer.Character.HumanoidRootPart.CFrame = player.Character.HumanoidRootPart.CFrame * CFrame.new(0, 0, -2)
+                        createNotification("Телепортировались к " .. player.Name, config.accentColor)
+                    else
+                        createNotification("Ошибка: Игрок недоступен", Color3.fromRGB(200, 40, 40))
+                    end
+                end)
+                if not success then
+                    createNotification("Ошибка телепорта: " .. err, Color3.fromRGB(200, 40, 40))
                 end
                 teleportDropdown.Visible = false
             end)
@@ -683,10 +841,12 @@ updateTeleportDropdown()
 
 teleportBtn.MouseButton1Click:Connect(function()
     teleportDropdown.Visible = not teleportDropdown.Visible
+    createNotification("Меню телепорта " .. (teleportDropdown.Visible and "открыто" or "закрыто"), config.accentColor)
 end)
 
 -- Вкладка "Бой"
 createToggle("Бой", "Аимбот", "aimbotEnabled")
+createSlider("Бой", "Поле зрения аимбота", "aimbotFOV", 50, 200, 100)
 createToggle("Бой", "Килл-аура", "killAuraEnabled")
 createToggle("Бой", "Ноклип", "noclip")
 createToggle("Бой", "Режим бога", "godMode")
@@ -694,25 +854,28 @@ createSlider("Бой", "Скорость персонажа", "speedHack", 16, 1
 
 -- Вкладка "Визуалы"
 createToggle("Визуалы", "ESP игроков", "espEnabled")
+createToggle("Визуалы", "Показывать имена", "espShowNames")
+createToggle("Визуалы", "Показывать роли", "espShowRoles")
+createToggle("Визуалы", "Визуальные эффекты", "visualEffects")
 
-local espColorLabel = Instance.new("TextLabel", tabFrames["Визуалы"])
-espColorLabel.Size = UDim2.new(1, 0, 0, 30)
-espColorLabel.BackgroundTransparency = 1
-espColorLabel.Text = "Цвет ESP"
-espColorLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-espColorLabel.Font = Enum.Font.Gotham
-espColorLabel.TextSize = 16
-espColorLabel.TextXAlignment = Enum.TextXAlignment.Left
+local espColorLabelMurderer = Instance.new("TextLabel", tabFrames["Визуалы"])
+espColorLabelMurderer.Size = UDim2.new(1, 0, 0, 30)
+espColorLabelMurderer.BackgroundTransparency = 1
+espColorLabelMurderer.Text = "Цвет ESP для мардера"
+espColorLabelMurderer.TextColor3 = Color3.fromRGB(200, 200, 200)
+espColorLabelMurderer.Font = Enum.Font.Gotham
+espColorLabelMurderer.TextSize = 16
+espColorLabelMurderer.TextXAlignment = Enum.TextXAlignment.Left
 
-local espColorHolder = Instance.new("Frame", tabFrames["Визуалы"])
-espColorHolder.Size = UDim2.new(1, 0, 0, 40)
-espColorHolder.BackgroundTransparency = 1
-local espColorLayout = Instance.new("UIListLayout", espColorHolder)
-espColorLayout.FillDirection = Enum.FillDirection.Horizontal
-espColorLayout.Padding = UDim.new(0, 8)
+local espColorHolderMurderer = Instance.new("Frame", tabFrames["Визуалы"])
+espColorHolderMurderer.Size = UDim2.new(1, 0, 0, 40)
+espColorHolderMurderer.BackgroundTransparency = 1
+local espColorLayoutMurderer = Instance.new("UIListLayout", espColorHolderMurderer)
+espColorLayoutMurderer.FillDirection = Enum.FillDirection.Horizontal
+espColorLayoutMurderer.Padding = UDim.new(0, 8)
 
 for _, preset in ipairs(colorPresets) do
-    local espColorBtn = Instance.new("TextButton", espColorHolder)
+    local espColorBtn = Instance.new("TextButton", espColorHolderMurderer)
     espColorBtn.Size = UDim2.new(0, 60, 0, 30)
     espColorBtn.BackgroundColor3 = preset.Color
     espColorBtn.Text = preset.Name
@@ -721,9 +884,85 @@ for _, preset in ipairs(colorPresets) do
     espColorBtn.TextSize = 12
     local btnCorner = Instance.new("UICorner", espColorBtn)
     btnCorner.CornerRadius = UDim.new(0, 8)
+    local btnStroke = Instance.new("UIStroke", espColorBtn)
+    btnStroke.Color = config.accentColor
+    btnStroke.Thickness = 1
     espColorBtn.MouseButton1Click:Connect(function()
-        config.espColor = preset.Color
+        config.espMurdererColor = preset.Color
         saveConfig()
+        createNotification("Цвет ESP мардера: " .. preset.Name, preset.Color)
+    end)
+end
+
+local espColorLabelSheriff = Instance.new("TextLabel", tabFrames["Визуалы"])
+espColorLabelSheriff.Size = UDim2.new(1, 0, 0, 30)
+espColorLabelSheriff.BackgroundTransparency = 1
+espColorLabelSheriff.Text = "Цвет ESP для шерифа"
+espColorLabelSheriff.TextColor3 = Color3.fromRGB(200, 200, 200)
+espColorLabelSheriff.Font = Enum.Font.Gotham
+espColorLabelSheriff.TextSize = 16
+espColorLabelSheriff.TextXAlignment = Enum.TextXAlignment.Left
+
+local espColorHolderSheriff = Instance.new("Frame", tabFrames["Визуалы"])
+espColorHolderSheriff.Size = UDim2.new(1, 0, 0, 40)
+espColorHolderSheriff.BackgroundTransparency = 1
+local espColorLayoutSheriff = Instance.new("UIListLayout", espColorHolderSheriff)
+espColorLayoutSheriff.FillDirection = Enum.FillDirection.Horizontal
+espColorLayoutSheriff.Padding = UDim.new(0, 8)
+
+for _, preset in ipairs(colorPresets) do
+    local espColorBtn = Instance.new("TextButton", espColorHolderSheriff)
+    espColorBtn.Size = UDim2.new(0, 60, 0, 30)
+    espColorBtn.BackgroundColor3 = preset.Color
+    espColorBtn.Text = preset.Name
+    espColorBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    espColorBtn.Font = Enum.Font.Gotham
+    espColorBtn.TextSize = 12
+    local btnCorner = Instance.new("UICorner", espColorBtn)
+    btnCorner.CornerRadius = UDim.new(0, 8)
+    local btnStroke = Instance.new("UIStroke", espColorBtn)
+    btnStroke.Color = config.accentColor
+    btnStroke.Thickness = 1
+    espColorBtn.MouseButton1Click:Connect(function()
+        config.espSheriffColor = preset.Color
+        saveConfig()
+        createNotification("Цвет ESP шерифа: " .. preset.Name, preset.Color)
+    end)
+end
+
+local espColorLabelInnocent = Instance.new("TextLabel", tabFrames["Визуалы"])
+espColorLabelInnocent.Size = UDim2.new(1, 0, 0, 30)
+espColorLabelInnocent.BackgroundTransparency = 1
+espColorLabelInnocent.Text = "Цвет ESP для мирных"
+espColorLabelInnocent.TextColor3 = Color3.fromRGB(200, 200, 200)
+espColorLabelInnocent.Font = Enum.Font.Gotham
+espColorLabelInnocent.TextSize = 16
+espColorLabelInnocent.TextXAlignment = Enum.TextXAlignment.Left
+
+local espColorHolderInnocent = Instance.new("Frame", tabFrames["Визуалы"])
+espColorHolderInnocent.Size = UDim2.new(1, 0, 0, 40)
+espColorHolderInnocent.BackgroundTransparency = 1
+local espColorLayoutInnocent = Instance.new("UIListLayout", espColorHolderInnocent)
+espColorLayoutInnocent.FillDirection = Enum.FillDirection.Horizontal
+espColorLayoutInnocent.Padding = UDim.new(0, 8)
+
+for _, preset in ipairs(colorPresets) do
+    local espColorBtn = Instance.new("TextButton", espColorHolderInnocent)
+    espColorBtn.Size = UDim2.new(0, 60, 0, 30)
+    espColorBtn.BackgroundColor3 = preset.Color
+    espColorBtn.Text = preset.Name
+    espColorBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    espColorBtn.Font = Enum.Font.Gotham
+    espColorBtn.TextSize = 12
+    local btnCorner = Instance.new("UICorner", espColorBtn)
+    btnCorner.CornerRadius = UDim.new(0, 8)
+    local btnStroke = Instance.new("UIStroke", espColorBtn)
+    btnStroke.Color = config.accentColor
+    btnStroke.Thickness = 1
+    espColorBtn.MouseButton1Click:Connect(function()
+        config.espInnocentColor = preset.Color
+        saveConfig()
+        createNotification("Цвет ESP мирных: " .. preset.Name, preset.Color)
     end)
 end
 
@@ -732,34 +971,120 @@ createSlider("Визуалы", "Прозрачность ESP", "espTransparency"
 -- Вкладка "Мардер"
 createToggle("Мардер", "Аура ножа", "murdererFeatures")
 createSlider("Мардер", "Радиус ауры ножа", "knifeAuraRange", 5, 30, 15)
+createToggle("Мардер", "Автобросок ножа", "autoKnifeThrow")
 
 -- Вкладка "Шериф"
 createToggle("Шериф", "Аура пистолета", "sheriffFeatures")
 createSlider("Шериф", "Радиус ауры пистолета", "gunAuraRange", 10, 50, 20)
+createToggle("Шериф", "Автострельба", "autoShoot")
+
+-- Визуальные эффекты (частицы)
+local function createParticleEffect(character)
+    if not config.visualEffects or not character or not character:FindFirstChild("HumanoidRootPart") then return end
+    local particleEmitter = Instance.new("ParticleEmitter")
+    particleEmitter.Parent = character.HumanoidRootPart
+    particleEmitter.Texture = "rbxassetid://243098098"
+    particleEmitter.Color = ColorSequence.new(config.accentColor)
+    particleEmitter.Size = NumberSequence.new(0.5)
+    particleEmitter.Lifetime = NumberRange.new(0.5, 1)
+    particleEmitter.Rate = 20
+    particleEmitter.Speed = NumberRange.new(5)
+    return particleEmitter
+end
+
+-- Определение роли
+local function getPlayerRole(player)
+    local backpack = player:FindFirstChild("Backpack")
+    local character = player.Character
+    if (backpack and backpack:FindFirstChild("Knife")) or (character and character:FindFirstChild("Knife")) then
+        return "Murderer"
+    elseif (backpack and backpack:FindFirstChild("Gun")) or (character and character:FindFirstChild("Gun")) then
+        return "Sheriff"
+    else
+        return "Innocent"
+    end
+end
 
 -- Реализация ESP
 local espCache = {}
 local function updateESP()
     for _, player in ipairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            local role = getPlayerRole(player)
+            local color = role == "Murderer" and config.espMurdererColor or role == "Sheriff" and config.espSheriffColor or config.espInnocentColor
             if config.espEnabled then
                 if not espCache[player] then
+                    espCache[player] = {}
                     local highlight = Instance.new("Highlight")
                     highlight.Parent = player.Character
                     highlight.Adornee = player.Character
-                    highlight.FillColor = config.espColor
-                    highlight.OutlineColor = config.espColor
+                    highlight.FillColor = color
+                    highlight.OutlineColor = color
                     highlight.FillTransparency = config.espTransparency
                     highlight.OutlineTransparency = 0
-                    espCache[player] = highlight
+                    espCache[player].highlight = highlight
+
+                    if config.espShowNames or config.espShowRoles then
+                        local billboard = Instance.new("BillboardGui")
+                        billboard.Parent = player.Character.HumanoidRootPart
+                        billboard.Adornee = player.Character.HumanoidRootPart
+                        billboard.Size = UDim2.new(0, 200, 0, 50)
+                        billboard.StudsOffset = Vector3.new(0, 3, 0)
+                        billboard.AlwaysOnTop = true
+
+                        local nameLabel = Instance.new("TextLabel", billboard)
+                        nameLabel.Size = UDim2.new(1, 0, 0.5, 0)
+                        nameLabel.BackgroundTransparency = 1
+                        nameLabel.Text = config.espShowNames and player.Name or ""
+                        nameLabel.TextColor3 = color
+                        nameLabel.Font = Enum.Font.GothamBold
+                        nameLabel.TextSize = 14
+                        nameLabel.TextStrokeTransparency = 0.5
+
+                        local roleLabel = Instance.new("TextLabel", billboard)
+                        roleLabel.Size = UDim2.new(1, 0, 0.5, 0)
+                        roleLabel.Position = UDim2.new(0, 0, 0.5, 0)
+                        roleLabel.BackgroundTransparency = 1
+                        roleLabel.Text = config.espShowRoles and role or ""
+                        roleLabel.TextColor3 = color
+                        roleLabel.Font = Enum.Font.Gotham
+                        roleLabel.TextSize = 12
+                        roleLabel.TextStrokeTransparency = 0.5
+
+                        espCache[player].billboard = billboard
+                    end
+
+                    if config.visualEffects then
+                        espCache[player].particle = createParticleEffect(player.Character)
+                    end
                 else
-                    espCache[player].FillColor = config.espColor
-                    espCache[player].OutlineColor = config.espColor
-                    espCache[player].FillTransparency = config.espTransparency
+                    espCache[player].highlight.FillColor = color
+                    espCache[player].highlight.OutlineColor = color
+                    espCache[player].highlight.FillTransparency = config.espTransparency
+                    if espCache[player].billboard then
+                        espCache[player].billboard:FindFirstChildOfClass("TextLabel").Text = config.espShowNames and player.Name or ""
+                        espCache[player].billboard:FindFirstChildOfClass("TextLabel").TextColor3 = color
+                        espCache[player].billboard:FindFirstChildOfClass("TextLabel").NextSibling.Text = config.espShowRoles and role or ""
+                        espCache[player].billboard:FindFirstChildOfClass("TextLabel").NextSibling.TextColor3 = color
+                    end
+                    if config.visualEffects and not espCache[player].particle then
+                        espCache[player].particle = createParticleEffect(player.Character)
+                    elseif not config.visualEffects and espCache[player].particle then
+                        espCache[player].particle:Destroy()
+                        espCache[player].particle = nil
+                    end
                 end
             else
                 if espCache[player] then
-                    espCache[player]:Destroy()
+                    if espCache[player].highlight then
+                        espCache[player].highlight:Destroy()
+                    end
+                    if espCache[player].billboard then
+                        espCache[player].billboard:Destroy()
+                    end
+                    if espCache[player].particle then
+                        espCache[player].particle:Destroy()
+                    end
                     espCache[player] = nil
                 end
             end
@@ -769,7 +1094,15 @@ end
 
 Players.PlayerRemoving:Connect(function(player)
     if espCache[player] then
-        espCache[player]:Destroy()
+        if espCache[player].highlight then
+            espCache[player].highlight:Destroy()
+        end
+        if espCache[player].billboard then
+            espCache[player].billboard:Destroy()
+        end
+        if espCache[player].particle then
+            espCache[player].particle:Destroy()
+        end
         espCache[player] = nil
     end
 end)
@@ -784,7 +1117,7 @@ local function getClosestPlayer()
             local screenPos, onScreen = Workspace.CurrentCamera:WorldToViewportPoint(head.Position)
             if onScreen then
                 local distance = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(mousePos.X, mousePos.Y)).Magnitude
-                if distance < dist then
+                if distance < config.aimbotFOV and distance < dist then
                     closest = player
                     dist = distance
                 end
@@ -794,22 +1127,9 @@ local function getClosestPlayer()
     return closest
 end
 
--- Определение роли
-local function getPlayerRole()
-    local backpack = LocalPlayer:FindFirstChild("Backpack")
-    local character = LocalPlayer.Character
-    if (backpack and backpack:FindFirstChild("Knife")) or (character and character:FindFirstChild("Knife")) then
-        return "Murderer"
-    elseif (backpack and backpack:FindFirstChild("Gun")) or (character and character:FindFirstChild("Gun")) then
-        return "Sheriff"
-    else
-        return "Innocent"
-    end
-end
-
 -- Аура ножа для мардера
 local function knifeAura()
-    if not config.murdererFeatures or getPlayerRole() ~= "Murderer" then return end
+    if not config.murdererFeatures or getPlayerRole(LocalPlayer) ~= "Murderer" then return end
     local character = LocalPlayer.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then return end
     local tool = character:FindFirstChild("Knife") or (LocalPlayer.Backpack and LocalPlayer.Backpack:FindFirstChild("Knife"))
@@ -832,7 +1152,7 @@ end
 
 -- Аура пистолета для шерифа
 local function gunAura()
-    if not config.sheriffFeatures or getPlayerRole() ~= "Sheriff" then return end
+    if not config.sheriffFeatures or getPlayerRole(LocalPlayer) ~= "Sheriff" then return end
     local character = LocalPlayer.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then return end
     local tool = character:FindFirstChild("Gun") or (LocalPlayer.Backpack and LocalPlayer.Backpack:FindFirstChild("Gun"))
@@ -847,6 +1167,46 @@ local function gunAura()
                             remote:FireServer(player.Character.Humanoid)
                         end)
                     end
+                end
+            end
+        end
+    end
+end
+
+-- Автобросок ножа
+local function autoKnifeThrow()
+    if not config.autoKnifeThrow or getPlayerRole(LocalPlayer) ~= "Murderer" then return end
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+    local tool = character:FindFirstChild("Knife") or (LocalPlayer.Backpack and LocalPlayer.Backpack:FindFirstChild("Knife"))
+    if tool then
+        local remote = tool:FindFirstChildOfClass("RemoteEvent")
+        if remote then
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                    pcall(function()
+                        remote:FireServer(player.Character.Humanoid)
+                    end)
+                end
+            end
+        end
+    end
+end
+
+-- Автострельба
+local function autoShoot()
+    if not config.autoShoot or getPlayerRole(LocalPlayer) ~= "Sheriff" then return end
+    local character = LocalPlayer.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+    local tool = character:FindFirstChild("Gun") or (LocalPlayer.Backpack and LocalPlayer.Backpack:FindFirstChild("Gun"))
+    if tool then
+        local remote = tool:FindFirstChildOfClass("RemoteEvent")
+        if remote then
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                    pcall(function()
+                        remote:FireServer(player.Character.Humanoid)
+                    end)
                 end
             end
         end
@@ -910,6 +1270,8 @@ RunService.RenderStepped:Connect(function()
         end
         knifeAura()
         gunAura()
+        autoKnifeThrow()
+        autoShoot()
         autoFarm()
         noClip()
         godMode()
@@ -917,5 +1279,6 @@ RunService.RenderStepped:Connect(function()
     end)
 end)
 
-print("[XOVAL MM2 PRO] Чит успешно загружен")
-```
+-- Инициализация
+print("[XOVAL] Чит успешно загружен")
+createNotification("XOVAL загружен", config.accentColor)
